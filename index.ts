@@ -3,27 +3,31 @@ import 'dotenv/config';
 
 // --- CONFIGURATION ---
 const TARGET_GYM_BRANCH = '台北小巨蛋瑜珈健身館';
-const TARGET_CLASSROOM = '小巨蛋E教室'; // Adjust if needed
-// const TARGET_CLASSROOM = '小巨蛋A教室'; // Adjust if needed
 
-const CLASS_SCHEDULE = [
-    { day: '周一', name: 'Pilates Mat Work 皮拉提斯(B)', time: '08:05' }, // DEV
-    { day: '周二', name: 'BODYCOMBAT™  戰鬥有氧 (M)', time: '12:10' },
-    { day: '周六', name: 'BODYCOMBAT™  戰鬥有氧 (M)', time: '02:45' },
-    { day: '周日', name: 'BODYJAM™ 潮流舞蹈  (M)', time: '01:30' },
+interface ClassInfo {
+    day: '周一' | '周二' | '周三' | '周四' | '周五' | '周六' | '周日';
+    name: string;
+    time: string;
+    classroom: string;
+}
+
+const CLASS_SCHEDULE: ClassInfo[] = [
+    { day: '周二', name: 'BODYCOMBAT™  戰鬥有氧 (M)', time: '12:10', classroom: '小巨蛋A教室' },
+    { day: '周六', name: 'BODYCOMBAT™  戰鬥有氧 (M)', time: '02:45', classroom: '小巨蛋A教室' },
+    { day: '周日', name: 'BODYJAM™ 潮流舞蹈  (M)', time: '01:30', classroom: '小巨蛋A教室' },
 ];
 
 // --- TIME-BASED HELPER FUNCTIONS ---
 
 // Maps Chinese day names to JavaScript's day-of-the-week number (Sunday=0)
-const dayNameToNumber = { '周日': 0, '周一': 1, '周二': 2, '周三': 3, '周四': 4, '周五': 5, '周六': 6 };
+const dayNameToNumber: { [key: string]: number } = { '周日': 0, '周一': 1, '周二': 2, '周三': 3, '周四': 4, '周五': 5, '周六': 6 };
 
 /**
  * Calculates the exact Date object for the next occurrence of a class.
- * @param {{day: string, time: string}} classInfo - The class schedule item.
+ * @param {ClassInfo} classInfo - The class schedule item.
  * @returns {Date} The full Date object for the next class session.
  */
-function getNextClassDateTime(classInfo) {
+function getNextClassDateTime(classInfo: ClassInfo): Date {
     const now = new Date();
     const targetDay = dayNameToNumber[classInfo.day];
     const [hours, minutes] = classInfo.time.split(':').map(Number);
@@ -42,27 +46,35 @@ function getNextClassDateTime(classInfo) {
 
 /**
  * Determines if a target date falls into the "next week" relative to the current date,
- * assuming the week starts on Monday.
+ * assuming the week starts on Monday and ends on Sunday.
  * @param {Date} classDate - The date of the class to check.
  * @returns {boolean} - True if the class is in the next calendar week.
  */
-function isNextWeek(classDate) {
+function isNextWeek(classDate: Date): boolean {
     const now = new Date();
-    // Clone dates to avoid modifying them
-    const date1 = new Date(now.getTime());
-    const date2 = new Date(classDate.getTime());
-    // Get Monday of the respective weeks
-    const monday1 = new Date(date1.setDate(date1.getDate() - (date1.getDay() + 6) % 7));
-    const monday2 = new Date(date2.setDate(date2.getDate() - (date2.getDay() + 6) % 7));
-    // Compare the start of the weeks
-    return monday2.getTime() > monday1.getTime();
+
+    // Find the Monday of the current week.
+    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysToSubtractForMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const mondayOfThisWeek = new Date(now);
+    mondayOfThisWeek.setDate(now.getDate() - daysToSubtractForMonday);
+    mondayOfThisWeek.setHours(0, 0, 0, 0); // Set to beginning of the day
+
+    // Find the Sunday of the current week.
+    const sundayOfThisWeek = new Date(mondayOfThisWeek);
+    sundayOfThisWeek.setDate(mondayOfThisWeek.getDate() + 6);
+    sundayOfThisWeek.setHours(23, 59, 59, 999); // Set to end of the day
+
+    // Since getNextClassDateTime always returns a future date, we only need to check
+    // if the class is scheduled for after the end of this week (after Sunday).
+    return classDate.getTime() > sundayOfThisWeek.getTime();
 }
 
 
 (async () => {
     const now = new Date();
-    let classToBook = null;
-    let targetClassDateTime = null;
+    let classToBook: ClassInfo | null = null;
+    let targetClassDateTime: Date | null = null;
 
     console.log(`Script run at: ${now.toLocaleString('zh-TW')}`);
     console.log('Checking schedule for classes to book...');
@@ -82,7 +94,7 @@ function isNextWeek(classDate) {
         }
     }
 
-    if (!classToBook) {
+    if (!classToBook || !targetClassDateTime) {
         console.log('No classes are within their booking window right now. Exiting.');
         return;
     }
@@ -93,8 +105,8 @@ function isNextWeek(classDate) {
 
     // --- START AUTOMATION ---
     const { USERNAME, PASSWORD, LOGIN_URL } = process.env;
-    if (!USERNAME || !PASSWORD) {
-        console.error('Error: Please create a .env file and add your USERNAME and PASSWORD.');
+    if (!USERNAME || !PASSWORD || !LOGIN_URL) {
+        console.error('Error: Please create a .env file and add your USERNAME, PASSWORD, and LOGIN_URL.');
         process.exit(1);
     }
 
@@ -135,12 +147,12 @@ function isNextWeek(classDate) {
         }
 
         // Select Classroom
-        console.log(`Selecting classroom: ${TARGET_CLASSROOM}`);
-        await page.click(`label:has-text("${TARGET_CLASSROOM}")`);
+        console.log(`Selecting classroom: ${classToBook.classroom}`);
+        await page.click(`label:has-text("${classToBook.classroom}")`);
 
         // Verification step: Wait for the classroom's label to be inside a 'selected' span.
         console.log('Verifying classroom selection...');
-        const selectedClassroomLocator = page.locator(`span.selected label:has-text("${TARGET_CLASSROOM}")`);
+        const selectedClassroomLocator = page.locator(`span.selected label:has-text("${classToBook.classroom}")`);
         await selectedClassroomLocator.waitFor({ state: 'visible', timeout: 10000 });
         console.log('Classroom correctly selected.');
 
@@ -154,17 +166,22 @@ function isNextWeek(classDate) {
 
         console.log(`Searching for class: "${classToBook.name}" at ${classToBook.time}`);
 
-        // await classRow.locator(`td:has-text("${classToBook.name}")`).first().click();
-        const classTile = page.locator('a', {
-            has: page.locator(`span:has-text("${classToBook.name}")`),
+        // The website displays a grid of 7 days, starting with Monday. We need to find the correct day's container.
+        const dayToIndex = { '周一': 0, '周二': 1, '周三': 2, '周四': 3, '周五': 4, '周六': 5, '周日': 6 };
+        const scheduleIndex = dayToIndex[classToBook.day];
+        const dayScheduleContainer = page.locator('td.studio-schedule').nth(scheduleIndex);
+
+        const classTile = dayScheduleContainer.locator('a').filter({
             hasText: classToBook.name
-        })
+        }).filter({
+            hasText: classToBook.time
+        });
 
         if (await classTile.count() === 0) {
-            throw new Error(`Class "${classToBook.name}" at ${classToBook.time} not found on the schedule.`);
+            throw new Error(`Class "${classToBook.name}" at ${classToBook.time} not found in the correct day's schedule.`);
         }
         console.log('Class found, clicking on it to open the booking overlay...');
-        classTile.first().click();
+        await classTile.first().click();
 
 
         // 8. HANDLE THE BOOKING OVERLAY (IFRAME)
@@ -177,7 +194,7 @@ function isNextWeek(classDate) {
 
         // SCENARIO HANDLING
         const bookNowButton = bookingFrame.locator('a#ctl00_cphContents_btnBook.btn-gradient.btnLoader:has-text("現在就預訂此課")');
-        const statusContainer = bookingFrame.locator('.class-info .header:last-child .right.ar');
+        const statusContainer = bookingFrame.locator('.class-info .header').nth(1).locator('.right.ar');
 
         if (await bookNowButton.count() > 0) {
             // Scenario 1: Class is available for booking
@@ -186,17 +203,17 @@ function isNextWeek(classDate) {
             // await bookNowButton.click();
         } else if (await statusContainer.count() > 0) {
             const statusText = await statusContainer.textContent();
-            if (statusText.includes('您已預訂此課')) {
+            if (statusText && statusText.includes('預訂開始日期:')) {
                 // Scenario 4: Already booked
                 console.log('Status: You have already booked this class.');
-            } else if (statusText.includes('額滿')) {
+            } else if (statusText && statusText.includes('此課程已無空缺！')) {
                 // Scenario 3: Class is full
                 console.log('Status: Class is full.');
-            } else if (statusText.includes('尚未開放預訂')) {
+            } else if (statusText && statusText.includes('尚未開放預訂')) {
                 // Scenario 2: Not yet open
                 console.log(`Status: Booking is not open yet. Full message: ${statusText.trim()}`);
             } else {
-                console.log(`Status: Unknown. Container text is: "${statusText.trim()}"`);
+                console.log(`Status: Unknown. Container text is: "${statusText ? statusText.trim() : 'empty'}"`);
             }
         } else {
             console.log('Status: Unknown. Could not determine the booking status from the overlay.');
